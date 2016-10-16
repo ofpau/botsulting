@@ -53,6 +53,8 @@ logger.setLevel(logging.DEBUG)
 # Program setup
 MENU, WAITING_TRIVIA_ANSWER, GAME, RIDDLE, WAITING_RIDDLE_ANSWER = range(5)
 BOT_NAME = "Botsulting"
+OPTIONS = ['A', 'B', 'C', 'D']
+users = {}
 
 
 def start(bot, update):
@@ -64,13 +66,26 @@ def start(bot, update):
         reply_markup=ReplyKeyboardMarkup(reply_keyboard,
                                          one_time_keyboard=True),
         parse_mode=ParseMode.HTML)  # Doesn't parse it as HTML :(
+    telegram_user = update.message.from_user
+
+    users[telegram_user.id] = {
+        'telegram_user': telegram_user,
+        'points': 0,
+        'asked_questions': [],
+        'asked_riddles': [],
+        'positive_feedback_used': [],
+        'negative_feedback_used': []
+    }
 
     return MENU
 
 
 def menu(bot, update):
     text = update.message.text
+    # add user to users array if not there yet
+
     print text
+
     update.message.reply_text('Got it! You chose ' + text + 'Let\'s get started.')
 
 
@@ -125,9 +140,6 @@ trivia_collection = get_trivia_list()
 ]
 '''
 
-OPTIONS = ['A', 'B', 'C', 'D']
-users = {}
-
 
 def send_first_trivia(bot, update):
     update.message.reply_text('Let\'s play trivia! \n'
@@ -139,15 +151,6 @@ def send_trivia(bot, update):
 
     # add user to users array if not there yet
     telegram_user = update.message.from_user
-
-    if not telegram_user.id in users:
-        users[telegram_user.id] = {
-            'telegram_user': telegram_user,
-            'points': 0,
-            'asked_questions': [],
-            'positive_feedback_used': [],
-            'negative_feedback_used': []
-        }
 
     user = users[telegram_user.id]
     logger.info('I\'m playing trivia! Points: ' + str(user['points']))
@@ -261,16 +264,7 @@ def send_riddle(bot, update):
 
     # add user to users array if not there yet
     telegram_user = update.message.from_user
-
-    if not telegram_user.id in users:
-        users[telegram_user.id] = {
-            'telegram_user': telegram_user,
-            'points': 0,
-            'asked_riddles': [],
-            'positive_feedback_used': [],
-            'negative_feedback_used': []
-        }
-
+    print users
     user = users[telegram_user.id]
     logger.info('I\'m playing Riddle me this! Points: ' + str(user['points']))
 
