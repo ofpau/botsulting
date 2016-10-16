@@ -82,27 +82,30 @@ def start(bot, update):
     return MENU
 
 
-def get_trivia_list(amount=100, category=None, difficulty=None):
-    url = "http://opentdb.com/api.php?"
-    urlfinal = "http://opentdb.com/api.php?amount=10&category=24&difficulty=easy"
+def get_trivia_list(amount=1000, category=None, difficulty=None):
+    try:
+        url = "http://opentdb.com/api.php?"
+        urlfinal = "http://opentdb.com/api.php?amount=10&category=24&difficulty=easy"
 
-    if amount:
-        url = url + '&amount=' + str(amount)
-    if category:
-        url = url + '&category=' + category
-    if difficulty:
-        url = url + '&difficulty=' + difficulty
-    logger.info('Getting trivia from ' + url)
+        if amount:
+            url = url + '&amount=' + str(amount)
+        if category:
+            url = url + '&category=' + category
+        if difficulty:
+            url = url + '&difficulty=' + difficulty
+        logger.info('Getting trivia from ' + url)
 
-    result = urllib2.urlopen(url).read()
-    result_json = json.loads(result)
-    if result_json['response_code'] == 0:
-        logger.info('Fetched result correctly.')
-        return result_json['results']
-    else:
-        logger.exception('No results!!')
-        return []
-
+        result = urllib2.urlopen(url).read()
+        result_json = json.loads(result)
+        if result_json['response_code'] == 0:
+            logger.info('Fetched result correctly.')
+            return result_json['results']
+        else:
+            logger.exception('No results!!')
+            return []
+    except:
+        from text_res import trivia_backup
+        return trivia_backup
 
 trivia_collection = get_trivia_list()
 
@@ -145,7 +148,9 @@ def send_trivia(bot, update):
 
     update.message.reply_text(
         final_text,
-        reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True))
+        reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True),
+        parse_mode=ParseMode.HTML
+    )
 
     # add question and correct choice to the user object
     user['current_question'] = question
@@ -160,14 +165,13 @@ def send_trivia(bot, update):
     return WAITING_TRIVIA_ANSWER
 
 
-
 def build_trivia_question(question):
     question_text = HTMLParser().unescape(question['question']) + '\n'
     answers_list = question['incorrect_answers'][:]
     answers_list.append(question['correct_answer'])
     random.shuffle(answers_list)
     correct_choice = answers_list.index(question['correct_answer'])
-    final_text = question_text + '\n'.join(['\\' + OPTIONS[i] + ' ' + HTMLParser().unescape(a) for i, a in enumerate(answers_list)])
+    final_text = question_text + '\n'.join(['<b>' + OPTIONS[i] + '</b>) ' + HTMLParser().unescape(a) for i, a in enumerate(answers_list)])
     return final_text, correct_choice
 
 
@@ -272,6 +276,7 @@ def send_riddle(bot, update):
 
 def check_riddle_answer(bot, update):
     # get current question, check correctness
+    chat_id = update.message.chat_id
     telegram_user = update.message.from_user
     user = users[telegram_user.id]
     question = user['current_question']
@@ -291,12 +296,10 @@ def check_riddle_answer(bot, update):
 
     else:
         # insult appropriately
-        update.message.reply_text('That\'s <b>wrong!</b>', parse_mode=ParseMode.HTML)
-        update.message.reply_text('<b>' + get_negative_feedback(user) + '</b>',
-                                  parse_mode=ParseMode.HTML)
-
-        # poor noob
-        update.message.reply_text('\n The correct answer was ' + user['correct_answer'])
+        update.message.reply_text('That\'s <b>wrong!</b>' +
+                                    '<b>' + get_negative_feedback(user) + '</b>' +
+                                    '\n The correct answer was ' + user['correct_answer'],
+                                parse_mode=ParseMode.HTML)
 
         if random.randrange(0, 100)%3 == 0:
             update.message.reply_text('You sure you want to keep playing? ' +
