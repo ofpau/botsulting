@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 # Program setup
-MENU, TRIVIA, GAME, RIDDLE = range(4)
+MENU, WAITING_TRIVIA_ANSWER, GAME, RIDDLE = range(4)
 BOT_NAME = "Botsulting"
 
 
@@ -61,7 +61,7 @@ def start(bot, update):
         '. <b>What</b> do you want to do today?\n',
         reply_markup=ReplyKeyboardMarkup(reply_keyboard,
                                          one_time_keyboard=True),
-        parse_mode=ParseMode.HTML) # Doesn't parse it as HTML :(
+        parse_mode=ParseMode.HTML)  # Doesn't parse it as HTML :(
 
     return MENU
 
@@ -79,13 +79,6 @@ def riddle(bot, update):
     return RIDDLE
 
 
-def trivia(bot, update):
-    text = update.message.text
-    print update.message.from_user.first_name + ' started playing ' + text
-    update.message.reply_text('Welcome to ' + text + '! Let\'s get started...')
-    return TRIVIA
-
-
 def game(bot, update):
     text = update.message.text
     print update.message.from_user.first_name + ' started playing ' + text
@@ -93,7 +86,7 @@ def game(bot, update):
     return GAME
 
 
-def get_trivia_list(amount=100, category=None, difficulty=None):
+def get_trivia_list(amount=10, category=None, difficulty=None):
     url = "http://opentdb.com/api.php?"
     urlfinal = "http://opentdb.com/api.php?amount=10&category=24&difficulty=easy"
 
@@ -131,20 +124,31 @@ trivia_collection = get_trivia_list()
 '''
 
 OPTIONS = ['A', 'B', 'C', 'D']
+users = {}
 
-def trivia(bot, update, points=0):
-    logger.info('I\'m playing trivia! Points: ' + str(points))
 
+def send_trivia(bot, update):
     update.message.reply_text('You\'re playing trivia!')
     update.message.reply_text('Ready to loose, ' + update.message.from_user.first_name + '?')
-    logger.info('Returning ' + str(TRIVIA))
 
-    question = random.choice(trivia_collection).copy()
-    question_text = question['question'] + '\n'
-    answers_list = question['incorrect_answers'][:]
-    answers_list.append(question['correct_answer'])
-    random.shuffle(answers_list)
-    final_text = question_text + '\n'.join(['\\' + OPTIONS[i] + ' ' + a for i, a in enumerate(answers_list)])
+    # add user to users array if not there yet
+    telegram_user = update.message.from_user
+
+    if not telegram_user.id in users:
+        users[telegram_user.id] = {
+            'telegram_user': telegram_user,
+            'points': 0,
+            'asked_questions': []
+        }
+
+    user = users[telegram_user.id]
+    logger.info('I\'m playing trivia! Points: ' + str(user['points']))
+
+    # get, generate and send NEW trivia question
+    question = random.choice(trivia_collection)
+    while question['question'] in user['asked_questions']:
+        question = random.choice(trivia_collection)
+    final_text, correct_choice = build_trivia_question(question)
     logger.info(final_text)
 
     reply_keyboard = [OPTIONS[:2], OPTIONS[-2:]]
@@ -153,9 +157,25 @@ def trivia(bot, update, points=0):
         final_text,
         reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True))
 
-    update.message
+    # add question and correct choice to the user object
+    user['current_question'] = question
+    user['correct_choice'] = correct_choice
 
-    return TRIVIA
+    # mark question as asked
+    user['asked_questions'].append(question['question'])
+
+    # return state waiting_trivia_answer
+    return WAITING_TRIVIA_ANSWER
+
+
+def build_trivia_question(question):
+    question_text = question['question'] + '\n'
+    answers_list = question['incorrect_answers'][:]
+    answers_list.append(question['correct_answer'])
+    random.shuffle(answers_list)
+    correct_choice = answers_list.index(question['correct_answer'])
+    final_text = question_text + '\n'.join(['\\' + OPTIONS[i] + ' ' + a for i, a in enumerate(answers_list)])
+    return final_text, correct_choice
 
 
 # setup of individual funtions within program
@@ -177,63 +197,28 @@ def triviaPreview(question, correct_answer, wrong_answers):  # questions and ans
                 return TRIVIA
 
 
-def gender(bot, update):
-    user = update.message.from_user
-    answer = update.message.text
-    if trivia_list[question].correctAnswer == answer:
-        logger.info("Gender of %s: %s" % (user.first_name, update.message.text))
-        update.message.reply_text('I see! Please send me a photo of yourself, '
-                                  'so I know what you look like, or send /skip if you don\'t want to.')
+def check_trivia_answer(bot, update):
+    # get current question, check correctness
+    telegram_user = update.message.from_user
+    user = users[telegram_user.id]
+    question = user['current_question']
+    user_answer = update.message.text
 
-    return PHOTO
+    logger.info('User answer: ' + user_answer)
+    logger.info('Correct answer: ' + OPTIONS[user['correct_choice']])
+    if user_answer == OPTIONS[user['correct_choice']]:
+        # correct answer
+        update.message.reply_text('Hum, so you got it right this time... Don\'t get used to it')
+        user['points'] += 1
+    else:
+        # jej poor noob
+        update.message.reply_text('Oh, that\'s wrong! Don\'t worry, I wasn\'t expecting much.' +
+                                  '\n The correct answer was ' + question['correct_answer'])
 
-
-def photo(bot, update):
-    user = update.message.from_user
-    photo_file = bot.getFile(update.message.photo[-1].file_id)
-    photo_file.download('user_photo.jpg')
-    logger.info("Photo of %s: %s" % (user.first_name, 'user_photo.jpg'))
-    update.message.reply_text('Gorgeous! Now, send me your location please, '
-                              'or send /skip if you don\'t want to.')
-
-    return LOCATION
-
-
-def skip_photo(bot, update):
-    user = update.message.from_user
-    logger.info("User %s did not send a photo." % user.first_name)
-    update.message.reply_text('I bet you look great! Now, send me your location please, '
-                              'or send /skip.')
-
-    return LOCATION
-
-
-def location(bot, update):
-    user = update.message.from_user
-    user_location = update.message.location
-    logger.info("Location of %s: %f / %f"
-                % (user.first_name, user_location.latitude, user_location.longitude))
-    update.message.reply_text('Maybe I can visit you sometime! '
-                              'At last, tell me something about yourself.')
-
-    return BIO
-
-
-def skip_location(bot, update):
-    user = update.message.from_user
-    logger.info("User %s did not send a location." % user.first_name)
-    update.message.reply_text('You seem a bit paranoid! '
-                              'At last, tell me something about yourself.')
-
-    return BIO
-
-
-def bio(bot, update):
-    user = update.message.from_user
-    logger.info("Bio of %s: %s" % (user.first_name, update.message.text))
-    update.message.reply_text('Thank you! I hope we can talk again some day.')
-
-    return ConversationHandler.END
+    # insult appropriately
+    # [increase user points]
+    # call send_trivia
+    return send_trivia(bot, update)
 
 
 def cancel(bot, update):
@@ -261,16 +246,16 @@ def main():
 
         states={
             MENU: [RegexHandler('^(Riddle me this)$', riddle),
-                   RegexHandler('^(Trivia knowledge)$', trivia),
+                   RegexHandler('^(Trivia knowledge)$', send_trivia),
                    RegexHandler('^(Multiplayer Game)$', game)],
 
-            TRIVIA: [MessageHandler([Filters.text], trivia),
-                     CommandHandler('skip', skip_photo)],
+            WAITING_TRIVIA_ANSWER: [MessageHandler([Filters.text], check_trivia_answer),
+                                    CommandHandler('skip', error)],
 
-            GAME: [MessageHandler([Filters.location], location),
-                   CommandHandler('skip', skip_location)],
+            GAME: [MessageHandler([Filters.location], error),
+                   CommandHandler('skip', error)],
 
-            RIDDLE: [MessageHandler([Filters.text], bio)]
+            RIDDLE: [MessageHandler([Filters.text], error)]
         },
 
         fallbacks=[CommandHandler('cancel', cancel)]
