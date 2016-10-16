@@ -37,6 +37,8 @@ import os
 import urllib2
 import json
 import random
+from text_res import insults, riddles, right_answer_insults
+from HTMLParser import HTMLParser
 
 TELEGRAM_KEY = os.environ['TELEGRAM_KEY']
 
@@ -49,7 +51,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 # Program setup
-MENU, WAITING_TRIVIA_ANSWER, GAME, RIDDLE = range(4)
+MENU, WAITING_TRIVIA_ANSWER, GAME, RIDDLE, WAITING_RIDDLE_ANSWER = range(5)
 BOT_NAME = "Botsulting"
 
 
@@ -58,7 +60,7 @@ def start(bot, update):
 
     update.message.reply_text(
         'Hello, I am ' + BOT_NAME +
-        '. <b>What</b> do you want to do today?\n',
+        '. What do you want to do today?\n',
         reply_markup=ReplyKeyboardMarkup(reply_keyboard,
                                          one_time_keyboard=True),
         parse_mode=ParseMode.HTML)  # Doesn't parse it as HTML :(
@@ -86,7 +88,7 @@ def game(bot, update):
     return GAME
 
 
-def get_trivia_list(amount=10, category=None, difficulty=None):
+def get_trivia_list(amount=100, category=None, difficulty=None):
     url = "http://opentdb.com/api.php?"
     urlfinal = "http://opentdb.com/api.php?amount=10&category=24&difficulty=easy"
 
@@ -127,9 +129,13 @@ OPTIONS = ['A', 'B', 'C', 'D']
 users = {}
 
 
+def send_first_trivia(bot, update):
+    update.message.reply_text('Let\'s play trivia! \n'
+                              'Ready to loose, ' + update.message.from_user.first_name + '?')
+    return send_trivia(bot, update)
+
+
 def send_trivia(bot, update):
-    update.message.reply_text('You\'re playing trivia!')
-    update.message.reply_text('Ready to loose, ' + update.message.from_user.first_name + '?')
 
     # add user to users array if not there yet
     telegram_user = update.message.from_user
@@ -138,7 +144,9 @@ def send_trivia(bot, update):
         users[telegram_user.id] = {
             'telegram_user': telegram_user,
             'points': 0,
-            'asked_questions': []
+            'asked_questions': [],
+            'positive_feedback_used': [],
+            'negative_feedback_used': []
         }
 
     user = users[telegram_user.id]
@@ -163,38 +171,22 @@ def send_trivia(bot, update):
 
     # mark question as asked
     user['asked_questions'].append(question['question'])
+    if len(user['asked_questions']) == len(trivia_collection):
+        user['asked_questions'] = []
 
     # return state waiting_trivia_answer
     return WAITING_TRIVIA_ANSWER
 
 
+
 def build_trivia_question(question):
-    question_text = question['question'] + '\n'
+    question_text = HTMLParser().unescape(question['question']) + '\n'
     answers_list = question['incorrect_answers'][:]
     answers_list.append(question['correct_answer'])
     random.shuffle(answers_list)
     correct_choice = answers_list.index(question['correct_answer'])
-    final_text = question_text + '\n'.join(['\\' + OPTIONS[i] + ' ' + a for i, a in enumerate(answers_list)])
+    final_text = question_text + '\n'.join(['\\' + OPTIONS[i] + ' ' + HTMLParser().unescape(a) for i, a in enumerate(answers_list)])
     return final_text, correct_choice
-
-
-# setup of individual funtions within program
-def triviaPreview(question, correct_answer, wrong_answers):  # questions and answers taken from api
-    for question in trivia_collection:
-        update.message.text_question  # sends question for player
-        # send possible answers
-        update.message.reply_text(
-            'What do you think?',
-            reply_keyboard=[['A', 'B', 'C', 'D']],  # answer keyboard for player
-            reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True))
-        if reply_markup == correct_answer:
-            update.message.text("So you think you\'re smart, huh? Let\'s try another?",
-                                reply_keyboard=[['Yes', 'No']],
-                                reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True))
-            if reply_markup == "No":
-                return MENU
-            else:
-                return TRIVIA
 
 
 def check_trivia_answer(bot, update):
@@ -208,17 +200,137 @@ def check_trivia_answer(bot, update):
     logger.info('Correct answer: ' + OPTIONS[user['correct_choice']])
     if user_answer == OPTIONS[user['correct_choice']]:
         # correct answer
-        update.message.reply_text('Hum, so you got it right this time... Don\'t get used to it')
-        user['points'] += 1
-    else:
-        # jej poor noob
-        update.message.reply_text('Oh, that\'s wrong! Don\'t worry, I wasn\'t expecting much.' +
-                                  '\n The correct answer was ' + question['correct_answer'])
+        feedback = get_positive_feedback(user)
+        update.message.reply_text('Hum, so you got it <b>right</b> this time... ' +
+                                  '<b>' + feedback + '</b>',
+                                  parse_mode=ParseMode.HTML)
 
-    # insult appropriately
-    # [increase user points]
+
+        # [increase user points]
+        user['points'] += 1
+
+    else:
+        # insult appropriately
+        update.message.reply_text('That\'s <b>wrong!</b>', parse_mode=ParseMode.HTML)
+
+        feedback = get_negative_feedback(user)
+
+        update.message.reply_text('<b>' + feedback + '</b>',
+                                  parse_mode=ParseMode.HTML)
+
+        # poor noob
+        update.message.reply_text('\n The correct answer was ' + question['correct_answer'])
+
+        if random.randrange(0, 100)%3 == 0:
+            update.message.reply_text('You sure you want to keep playing? ' +
+                                      'Remember, just send /cancel when you\'re ready to surrender.')
+
     # call send_trivia
     return send_trivia(bot, update)
+
+
+def get_negative_feedback(user):
+    feedback = random.choice(insults)
+    while insults.index(feedback) in user['negative_feedback_used']:
+        feedback = random.choice(insults)
+    user['negative_feedback_used'].append(insults.index(feedback))
+    if len(user['negative_feedback_used']) == len(insults):
+        user['negative_feedback_used'] = []
+    return feedback
+
+
+def get_positive_feedback(user):
+    feedback = random.choice(right_answer_insults)
+    while right_answer_insults.index(feedback) in user['positive_feedback_used']:
+        feedback = random.choice(right_answer_insults)
+    user['positive_feedback_used'].append(right_answer_insults.index(feedback))
+    if len(user['positive_feedback_used']) == len(right_answer_insults):
+        user['positive_feedback_used'] = []
+    return feedback
+
+
+#Riddle me this
+
+def send_first_riddle(bot, update):
+    update.message.reply_text('Let\'s play Riddle me this! \n'
+                              'Ready to loose, ' + update.message.from_user.first_name + '?')
+    return send_riddle(bot, update)
+
+
+def send_riddle(bot, update):
+
+    # add user to users array if not there yet
+    telegram_user = update.message.from_user
+
+    if not telegram_user.id in users:
+        users[telegram_user.id] = {
+            'telegram_user': telegram_user,
+            'points': 0,
+            'asked_riddles': [],
+            'positive_feedback_used': [],
+            'negative_feedback_used': []
+        }
+
+    user = users[telegram_user.id]
+    logger.info('I\'m playing Riddle me this! Points: ' + str(user['points']))
+
+    # get, generate and send NEW riddle question
+    question = random.choice(riddles)
+    while question[0] in user['asked_riddles']:
+        question = random.choice(riddles)
+    question_text, correct_answer = question
+    logger.info(question_text)
+    update.message.reply_text(question_text)
+    update.message.reply_text("Make your answer as short as possible but don\'t forget the article.")
+
+
+    # add question and correct choice to the user object
+    user['current_question'] = question
+    user['correct_answer'] = correct_answer
+
+    # mark question as asked
+    user['asked_riddles'].append(question_text)
+    if len(user['asked_riddles']) == len(riddles):
+        user['asked_riddles'] = []
+
+    # return state waiting_riddle_answer
+    return WAITING_RIDDLE_ANSWER
+
+
+def check_riddle_answer(bot, update):
+    # get current question, check correctness
+    telegram_user = update.message.from_user
+    user = users[telegram_user.id]
+    question = user['current_question']
+    user_answer = update.message.text
+
+    logger.info('User answer: ' + user_answer)
+    logger.info('Correct answer: ' + user['correct_answer'])
+    if user_answer == user['correct_answer']:
+        # correct answer
+        update.message.reply_text('Hum, so you got it <b>right</b> this time... ' +
+                                  '<b>' + get_positive_feedback(user) + '</b>',
+                                  parse_mode=ParseMode.HTML)
+
+
+        # [increase user points]
+        user['points'] += 1
+
+    else:
+        # insult appropriately
+        update.message.reply_text('That\'s <b>wrong!</b>', parse_mode=ParseMode.HTML)
+        update.message.reply_text('<b>' + get_negative_feedback(user) + '</b>',
+                                  parse_mode=ParseMode.HTML)
+
+        # poor noob
+        update.message.reply_text('\n The correct answer was ' + user['correct_answer'])
+
+        if random.randrange(0, 100)%3 == 0:
+            update.message.reply_text('You sure you want to keep playing? ' +
+                                      'Remember, just send /cancel when you\'re ready to surrender.')
+
+    # call send_riddle
+    return send_riddle(bot, update)
 
 
 def cancel(bot, update):
@@ -245,8 +357,8 @@ def main():
         entry_points=[CommandHandler('start', start)],
 
         states={
-            MENU: [RegexHandler('^(Riddle me this)$', riddle),
-                   RegexHandler('^(Trivia knowledge)$', send_trivia),
+            MENU: [RegexHandler('^(Riddle me this)$', send_first_riddle),
+                   RegexHandler('^(Trivia knowledge)$', send_first_trivia),
                    RegexHandler('^(Multiplayer Game)$', game)],
 
             WAITING_TRIVIA_ANSWER: [MessageHandler([Filters.text], check_trivia_answer),
@@ -255,7 +367,7 @@ def main():
             GAME: [MessageHandler([Filters.location], error),
                    CommandHandler('skip', error)],
 
-            RIDDLE: [MessageHandler([Filters.text], error)]
+            WAITING_RIDDLE_ANSWER: [MessageHandler([Filters.text], check_riddle_answer)]
         },
 
         fallbacks=[CommandHandler('cancel', cancel)]
