@@ -43,7 +43,7 @@ from HTMLParser import HTMLParser
 TELEGRAM_KEY = os.environ['TELEGRAM_KEY']
 
 # Enable logging
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s',
                     level=logging.INFO)
 
 logger = logging.getLogger(__name__)
@@ -51,14 +51,16 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 # Program setup
-MENU, WAITING_TRIVIA_ANSWER, GAME, RIDDLE, WAITING_RIDDLE_ANSWER = range(5)
+MENU, WAITING_TRIVIA_ANSWER, GAME, RIDDLE, WAITING_RIDDLE_ANSWER, PLAYING_GAME = range(6)
 BOT_NAME = "Botsulting"
 OPTIONS = ['A', 'B', 'C', 'D']
 users = {}
 
 
 def start(bot, update):
-    reply_keyboard = [['Trivia knowledge', 'Riddle me this', 'Multiplayer Game']]
+    #reply_keyboard = [['Trivia knowledge', 'Riddle me this', 'Multiplayer Game']]
+
+    reply_keyboard = [['Trivia knowledge', 'Riddle me this']]
 
     update.message.reply_text(
         'Hello, I am ' + BOT_NAME +
@@ -78,29 +80,6 @@ def start(bot, update):
     }
 
     return MENU
-
-
-def menu(bot, update):
-    text = update.message.text
-    # add user to users array if not there yet
-
-    print text
-
-    update.message.reply_text('Got it! You chose ' + text + 'Let\'s get started.')
-
-
-def riddle(bot, update):
-    text = update.message.text
-    print update.message.from_user.first_name + ' started playing ' + text
-    update.message.reply_text('Welcome to ' + text + '! Let\'s get started...')
-    return RIDDLE
-
-
-def game(bot, update):
-    text = update.message.text
-    print update.message.from_user.first_name + ' started playing ' + text
-    update.message.reply_text('Welcome to ' + text + '! Let\'s get started...')
-    return GAME
 
 
 def get_trivia_list(amount=100, category=None, difficulty=None):
@@ -339,6 +318,39 @@ def error(bot, update, error):
     logger.warn('Update "%s" caused error "%s"' % (update, error))
 
 
+def scores(bot, update):
+    chat_id = update.message.chat_id
+    logger.info("Requested scores for chat " + str(chat_id))
+    print update.message.chat
+    print "%d chat members!" % bot.getChatMembersCount(chat_id)
+    # update.message.reply_text("%d chat members!" % bot.getChatMembersCount(chat_id))
+    telegram_user = update.message.from_user
+    bot.send_message(chat_id, "%s you have <b>%d points!</b>" % (telegram_user.first_name, users[telegram_user.id]['points']),
+                              parse_mode=ParseMode.HTML)
+    return
+
+
+def start_game(bot, update):
+    chat_id = str(update.message.chat_id)
+    num_players = bot.getChatMembersCount(chat_id)-1
+    good_group = update.message.chat['type'] == 'group' and num_players >= 4 and num_players % 2 == 0
+    if not good_group:
+        update.message.reply_text("Ups, you are %d chat members! Go invite %d more people to play." % (num_players, 4-num_players))
+        return MENU
+    else:
+        message_text = "Welcome to the Multiplayer Game. I'm surprised you made it this far...\n"
+        message_text += "The rules are easy: one of you comes up with an insult, "
+        message_text += "and the others have the chance to rate if it's good or bad. Easy enough for you peabrains?"
+        update.message.reply_text(message_text)
+
+        update.message.reply_text("Sorry but this game is still under development! Come back later for some group fun.")
+        return MENU
+
+
+def multiplayer_game(bot, update):
+    pass
+
+
 def main():
     # Create the EventHandler and pass it your bot's token.
     updater = Updater(TELEGRAM_KEY)
@@ -353,15 +365,16 @@ def main():
         states={
             MENU: [RegexHandler('^(Riddle me this)$', send_first_riddle),
                    RegexHandler('^(Trivia knowledge)$', send_first_trivia),
-                   RegexHandler('^(Multiplayer Game)$', game)],
+                   RegexHandler('^(Multiplayer Game)$', start_game)],
 
             WAITING_TRIVIA_ANSWER: [MessageHandler([Filters.text], check_trivia_answer),
-                                    CommandHandler('skip', error)],
+                                    CommandHandler('score', scores)],
 
-            GAME: [MessageHandler([Filters.location], error),
-                   CommandHandler('skip', error)],
+            WAITING_RIDDLE_ANSWER: [MessageHandler([Filters.text], check_riddle_answer),
+                                    CommandHandler('score', scores)],
 
-            WAITING_RIDDLE_ANSWER: [MessageHandler([Filters.text], check_riddle_answer)]
+            PLAYING_GAME: [MessageHandler([Filters.location], multiplayer_game)]
+
         },
 
         fallbacks=[CommandHandler('cancel', cancel)]
